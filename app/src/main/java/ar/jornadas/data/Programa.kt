@@ -17,18 +17,50 @@ data class Charla(@PrimaryKey val id: String, val titulo: String, val tema: Stri
     val favorita: Boolean = false)
 
 @Dao
-interface CarteleraDao {
+abstract class CarteleraDao {
     @Query("SELECT * FROM charlas ORDER BY dia, hora, sala")
-    fun observar(): Flow<List<Charla>>
+    abstract fun observar(): Flow<List<Charla>>
+
+    @Query("SELECT * FROM charlas ORDER BY dia, hora, sala")
+    abstract suspend fun leer(): List<Charla>
 
     @Insert(onConflict = OnConflictStrategy.REPLACE)
-    suspend fun guardar(fichas: List<Charla>)
+    abstract suspend fun guardar(fichas: List<Charla>)
+
+    @Query("SELECT id FROM charlas WHERE favorita = 1")
+    abstract suspend fun favoritasActuales(): List<String>
+
+    @Query("DELETE FROM charlas")
+    abstract suspend fun borrarCatalogo()
+
+    @Query("SELECT descargado FROM estado_programa WHERE id = 1")
+    abstract fun observarDescarga(): Flow<Boolean?>
+
+    @Query("SELECT descargado FROM estado_programa WHERE id = 1")
+    abstract suspend fun leerDescarga(): Boolean?
+
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    abstract suspend fun guardarEstado(estado: EstadoPrograma)
+
+    @Transaction
+    open suspend fun reemplazar(fichas: List<Charla>) {
+        // Se leen después de la petición, dentro de la misma transacción de escritura.
+        val favoritas = favoritasActuales().toSet()
+        borrarCatalogo()
+        guardar(fichas.map { it.copy(favorita = it.id in favoritas) })
+        guardarEstado(EstadoPrograma(1, true))
+    }
 
     @Query("UPDATE charlas SET favorita = NOT favorita WHERE id = :id")
-    suspend fun alternar(id: String)
+    abstract suspend fun alternar(id: String)
 }
 
-@Database(entities = [Charla::class], version = 1, exportSchema = false)
+@Entity(tableName = "estado_programa")
+data class EstadoPrograma(@PrimaryKey val id: Int, val descargado: Boolean)
+
+data class ProgramaGuardado(val charlas: List<Charla>, val edicionValida: Boolean)
+
+@Database(entities = [Charla::class, EstadoPrograma::class], version = 2, exportSchema = false)
 abstract class Archivo : RoomDatabase() {
     abstract fun cartelera(): CarteleraDao
 }

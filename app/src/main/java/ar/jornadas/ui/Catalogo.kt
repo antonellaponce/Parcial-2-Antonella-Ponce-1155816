@@ -13,22 +13,35 @@ import ar.jornadas.data.Charla
 
 @Composable
 fun Catalogo(model: ProgramaModel, abrir: (String) -> Unit) {
-    LaunchedEffect(Unit) { model.recargar() }
     val dia by model.dia.collectAsStateWithLifecycle()
-    var tema by remember { mutableStateOf("Todos") }
-    val fichas by model.charlas.collectAsStateWithLifecycle()
+    val tema by model.tema.collectAsStateWithLifecycle()
+    val programa by model.programa.collectAsStateWithLifecycle()
+    val fichas = programa?.charlas.orEmpty()
+    val descargado = programa?.edicionValida == true
     val aviso by model.aviso.collectAsStateWithLifecycle()
     val cargando by model.cargando.collectAsStateWithLifecycle()
-    Selector(listOf("Ambos días", "Día 1", "Día 2"), dia) { model.dia.value = it }
     val temas = listOf("Todos", "Android", "Datos", "Calidad")
-    Selector(temas, temas.indexOf(tema)) { tema = temas[it] }
-    TextButton(onClick = model::recargar) { Text("Actualizar") }
-    if (cargando) LinearProgressIndicator(Modifier.fillMaxWidth())
-    if (aviso.isNotEmpty()) {
-        Text(aviso)
-        OutlinedButton(onClick = model::recargar) { Text("Reintentar") }
-    } else {
-        Grilla(fichas.filter { (dia == 0 || it.dia == dia) && (tema == "Todos" || it.tema == tema) }, abrir)
+    val visibles = fichas.filter { (dia == 0 || it.dia == dia) && (tema == "Todos" || it.tema == tema) }
+    // Un único scroll incluye los controles: también deja ver resultados en horizontal.
+    LazyColumn(verticalArrangement = Arrangement.spacedBy(8.dp),
+        contentPadding = PaddingValues(bottom = 12.dp)) {
+        item {
+            Selector(listOf("Ambos días", "Día 1", "Día 2"), dia, model::elegirDia)
+        }
+        item { Selector(temas, temas.indexOf(tema)) { model.elegirTema(temas[it]) } }
+        item { TextButton(onClick = model::recargar) { Text("Actualizar") } }
+        if (cargando) item { LinearProgressIndicator(Modifier.fillMaxWidth()) }
+        if (aviso.isNotEmpty()) {
+            item { Text(if (descargado) "$aviso. Usando datos guardados." else aviso) }
+            item { OutlinedButton(onClick = model::recargar) { Text("Reintentar") } }
+        }
+        when {
+            programa == null -> item { Text("Leyendo programa guardado…") }
+            descargado && fichas.isEmpty() -> item { Text("Sin charlas programadas") }
+            descargado && visibles.isEmpty() -> item { Text("No hay charlas para estos filtros") }
+            descargado -> items(visibles, key = { it.id }) { ficha -> TarjetaCharla(ficha, abrir) }
+            cargando -> item { Text("Cargando programa…") }
+        }
     }
 }
 
@@ -46,13 +59,18 @@ fun Grilla(fichas: List<Charla>, abrir: (String) -> Unit) {
     LazyColumn(verticalArrangement = Arrangement.spacedBy(8.dp),
         contentPadding = PaddingValues(bottom = 12.dp)) {
         items(fichas, key = { it.id }) { ficha ->
-            ElevatedCard(onClick = { abrir(ficha.id) }, modifier = Modifier.fillMaxWidth()) {
-                Column(Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                    Text("Día ${ficha.dia} · ${ficha.hora} · ${ficha.sala}", style = MaterialTheme.typography.labelMedium)
-                    Text(ficha.titulo, style = MaterialTheme.typography.titleLarge)
-                    Text(if (ficha.favorita) "${ficha.tema} · En mi agenda" else ficha.tema)
-                }
-            }
+            TarjetaCharla(ficha, abrir)
+        }
+    }
+}
+
+@Composable
+private fun TarjetaCharla(ficha: Charla, abrir: (String) -> Unit) {
+    ElevatedCard(onClick = { abrir(ficha.id) }, modifier = Modifier.fillMaxWidth()) {
+        Column(Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+            Text("Día ${ficha.dia} · ${ficha.hora} · ${ficha.sala}", style = MaterialTheme.typography.labelMedium)
+            Text(ficha.titulo, style = MaterialTheme.typography.titleLarge)
+            Text(if (ficha.favorita) "${ficha.tema} · En mi agenda" else ficha.tema)
         }
     }
 }
