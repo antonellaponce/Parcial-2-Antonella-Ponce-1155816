@@ -1,20 +1,53 @@
-# Jornadas del Sur · Guardia de mantenimiento
+# Jornadas del Sur — Explicación de las correcciones
 
-Quedan dos horas para entregar una corrección de la agenda de las jornadas. La versión instalada ya tiene usuarios con charlas guardadas. La organización publica instantáneas completas del programa. Una respuesta exitosa puede contener cero charlas. Los identificadores de las charlas son estables aunque cambie el título.
+Se corrigieron los pedidos 41 a 44 conservando los datos de las instalaciones existentes. Los comportamientos solicitados fueron verificados manualmente en Android.
 
-## Preparación previa
+## 41 · Programa sin señal
 
-Abrí esta carpeta en Android Studio con JDK 17, Android SDK 34 y un emulador de API 26 o superior. Sincronizá las dependencias con Internet antes de clase. Ejecutá app o compilá con ./gradlew assembleDebug (gradlew.bat assembleDebug en Windows). El APK queda en app/build/outputs/apk/debug/. Al actualizar una instalación, conservá los datos del usuario.
+**Qué modifiqué:** separé el estado de la consulta del contenido guardado. Ante un error, la pantalla conserva las charlas de Room y muestra un aviso de uso de datos guardados. Si nunca hubo una descarga exitosa, informa el error y ofrece **Reintentar**.
 
-Mesa controla el servicio local que usa Retrofit. Cada solicitud captura disponibilidad y edición al comenzar. Para provocar una falla, apagá el servicio antes de iniciar la petición. El contador incluye intentos fallidos y vuelve a cero al morir el proceso. La demora normal es 1,4 segundos y la larga es 8. En v1 hay doce charlas. En v2 la charla 11 cambia de título y sala. En v3 se retira la 11 e ingresa la 90. En v4 el programa está vacío.
+Agregué una tabla de estado para registrar si existe una edición descargada, incluso cuando contiene cero charlas. Por eso, una v4 exitosa muestra **“Sin charlas programadas”** y continúa siendo válida al reabrir sin señal. El estado inicial de lectura se distingue de un catálogo vacío.
 
-## Condiciones de entrega
+**Por qué:** una lista vacía no permite saber si nunca se descargó el programa o si la organización publicó una edición vacía. Además, un error de red no debe ocultar ni borrar información previamente guardada.
 
-| Pedido | Comportamiento observable |
-| --- | --- |
-| 41 · Programa sin señal | Con una edición previa, una falla conserva lista, detalle y favoritas e informa que se están usando datos guardados. Sin descarga previa debe ofrecer reintento. Una v4 exitosa muestra «sin charlas programadas» y sigue siendo una edición válida al reabrir sin señal. |
-| 42 · Agenda personal | Al pasar de v1 a v2, la charla 11 conserva su marca pero muestra «Compose en producción avanzada» y «Sala Puerto». En v3 desaparece la 11 del catálogo y de Mi agenda, entra la 90 y se conservan las marcas de las charlas vigentes. Si una charla se retira y después regresa, regresa sin marcar. Una marca agregada o quitada en una charla vigente durante una petición debe respetarse cuando llega la respuesta. |
-| 43 · Volver al punto de lectura | Elegí Día 2 y Datos, abrí «Cachés para viajeros», volvé y rotá. Deben quedar dos resultados de Datos. Repetí dejando la ficha abierta y mandando la app al fondo. Si Android recupera la tarea tras matar su proceso, debe recuperar la ficha y, al volver, ambos filtros. Una tarea nueva arranca sin filtros. |
-| 44 · Control de descargas | Una carga automática por sesión (proceso) y una por actualización explícita. Rotar, entrar a una ficha o cambiar de pestaña agrega cero. Dos toques durante una petición agregan un intento. Tras éxito o falla se puede volver a pedir. Los filtros siguen siendo editables durante la espera. |
+**Archivos principales:** `data/Programa.kt`, `data/AgendaRepository.kt`, `Servicios.kt` y `ui/Catalogo.kt`.
 
-Para el caso de proceso de 43, presioná Inicio, ejecutá `adb shell am kill ar.jornadas` y regresá desde Recientes. Para un arranque vacío sin señal, ejecutá `adb shell pm clear ar.jornadas` y luego `adb shell am start -n ar.jornadas/.MainActivity --ez servicio_disponible false`. El primer comando borra los datos de prueba.
+## 42 · Agenda personal
+
+**Qué modifiqué:** cada respuesta exitosa se aplica como una instantánea completa, dentro de una transacción de Room. Al guardarla, leo las favoritas actuales y conservo las marcas por el identificador estable de cada charla, no por su título.
+
+Así, en v2 la charla 11 conserva su marca y actualiza título y sala. En v3 se elimina la 11, aparece la 90 y se mantienen las marcas de las charlas vigentes. Si una charla retirada regresa después, vuelve sin marcar. Las marcas agregadas o quitadas durante la petición se respetan porque se consultan al aplicar la respuesta.
+
+**Por qué:** el guardado original reemplazaba registros con `favorita = false` y no eliminaba charlas ausentes de la nueva edición. La transacción evita que se observe un reemplazo parcial del catálogo.
+
+También contemplé que una actualización termine mientras está abierta la ficha de una charla retirada. Por ejemplo, si se está descargando v3 y abro la charla 11 antes de que termine, al llegar la respuesta esa charla desaparece de Room. Antes la ficha quedaba en blanco; ahora muestra **“Esta charla ya no está en el programa”** y permite volver.
+
+**Archivos principales:** `data/Programa.kt`, `data/AgendaRepository.kt` y `ui/Portada.kt`.
+
+## 43 · Volver al punto de lectura
+
+**Qué modifiqué:** guardé ambos filtros —día y tema— mediante `SavedStateHandle` en el ViewModel. Conservé el identificador de la ficha y la pestaña con `rememberSaveable`, como ya estaban en la pantalla principal.
+
+Los filtros se mantienen al entrar y salir de una ficha y al rotar. Si Android restaura la misma tarea después de matar el proceso, recupera la ficha y los filtros; una tarea nueva comienza con los filtros predeterminados. El contenido se vuelve a leer de Room, mostrando un estado de lectura mientras se recupera.
+
+También unifiqué controles y resultados en una lista desplazable para poder ver las charlas en orientación horizontal.
+
+**Por qué:** el tema estaba guardado solo con `remember` y el día solo en memoria del ViewModel. Esos mecanismos, por sí solos, no cubrían todos los eventos de restauración pedidos.
+
+**Archivos principales:** `ui/ProgramaModel.kt`, `ui/Portada.kt` y `ui/Catalogo.kt`.
+
+## 44 · Control de descargas
+
+**Qué modifiqué:** centralicé los servicios y el repositorio en una instancia compartida por proceso. La primera apertura inicia una única carga automática. Eliminé los disparadores de descarga de `onStart` y de la entrada al catálogo.
+
+El repositorio bloquea nuevas peticiones mientras hay una en curso. Al terminar, tanto por éxito como por error, libera ese bloqueo y permite otra actualización explícita. La petición utiliza un scope de proceso, por lo que no depende de que el catálogo siga visible. Los filtros permanecen editables durante la espera.
+
+**Por qué:** antes, rotar o regresar al catálogo podía iniciar descargas adicionales, y varios toques podían lanzar peticiones simultáneas. La coordinación compartida evita esos duplicados.
+
+**Archivos principales:** `Servicios.kt`, `MainActivity.kt`, `data/AgendaRepository.kt` y `ui/ProgramaModel.kt`.
+
+## Compatibilidad y conservación de datos
+
+- Incorporé una migración de Room de versión 1 a 2 que agrega el estado de descarga sin borrar las charlas ni sus favoritas. Si la instalación anterior ya contiene charlas, se reconoce como una edición guardada.
+- Unifiqué catálogo y estado de edición en `ProgramaGuardado`, leído dentro de una transacción, para no mezclar datos de momentos distintos.
+- Agregué `OkHttp 4.12.0` en `app/build.gradle.kts` para resolver las funciones que utiliza el servicio local original, sin modificar ese servicio.
